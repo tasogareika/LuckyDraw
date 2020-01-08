@@ -10,15 +10,17 @@ public class BackendHandler : MonoBehaviour
 {
     public static BackendHandler singleton;
     private string currInput, chosenCode, filePath;
-    public GameObject numberDisplay, enterKey, peopleBtn, resetBtn, printBtn;
+    public GameObject numberDisplay, enterKey, peopleBtn;
     public List<GameObject> gamePages;
     public Animation vaultAnim;
+    public AudioClip clickSFX;
+    public AudioSource BGMPlayer, SFXPlayer;
     private List<string> vaultCodes;
     public GameObject winImage, loseImage;
     public TextMeshProUGUI resultDisplayEng, resultDisplayCh, peopleDisplay;
     public Texture2D winTicket, loseTicket, ticket1, ticket2, tncTicket;
-    private int clickNo, peopleNo;
-    private float clickTime, clickDelay;
+    private int clickNo, peopleNo, giftNo, discountNo, winNo;
+    private float clickTime, clickDelay, idleTimer, idleTimerMax;
 
     private void Awake()
     {
@@ -33,7 +35,6 @@ public class BackendHandler : MonoBehaviour
         //Screen.SetResolution(720, 1280, false);
         Screen.SetResolution(1080, 1920, true);
         #endif
-
         SetupVault();
     }
 
@@ -41,6 +42,10 @@ public class BackendHandler : MonoBehaviour
     {
         clickNo = 0;
         clickDelay = 0.5f;
+
+        idleTimerMax = 15f;
+        idleTimer = idleTimerMax;
+
         togglePeopleBtn(false);
 
         //setup vault code
@@ -55,6 +60,7 @@ public class BackendHandler : MonoBehaviour
             vaultCodes.Add(line);
         }
 
+        #region STATS INFO
         if (PlayerPrefs.HasKey("peopleData"))
         {
             peopleNo = PlayerPrefs.GetInt("peopleData");
@@ -63,19 +69,67 @@ public class BackendHandler : MonoBehaviour
             peopleNo = 0;
         }
 
+        if (PlayerPrefs.HasKey("winData"))
+        {
+            winNo = PlayerPrefs.GetInt("winData");
+        } else
+        {
+            winNo = 0;
+        }
+
+        if (PlayerPrefs.HasKey("discountData"))
+        {
+            discountNo = PlayerPrefs.GetInt("discountData");
+        } else
+        {
+            discountNo = 0;
+        }
+
+        if (PlayerPrefs.HasKey("giftData"))
+        {
+            giftNo = PlayerPrefs.GetInt("giftData");
+        } else
+        {
+            giftNo = 0;
+        }
+
+        if (PlayerPrefs.HasKey("volume"))
+        {
+            toggleSound();
+        } else
+        {
+            PlayerPrefs.SetInt("volume", 1);
+            toggleSound();
+        }
+        #endregion
+
         if (PlayerPrefs.HasKey("prevCode"))
         {
             string oldCode = PlayerPrefs.GetString("prevCode");
-            for (int i = 0; i < vaultCodes.Count; i++)
+            if (oldCode.Contains(","))
             {
-                if (vaultCodes[i] == oldCode)
+                vaultCodes.Clear();
+            }
+            else
+            {
+                for (int i = 0; i < vaultCodes.Count; i++)
                 {
-                    vaultCodes.RemoveAt(i);
+                    if (vaultCodes[i] == oldCode)
+                    {
+                        vaultCodes.RemoveAt(i);
+                    }
                 }
             }
+        } else
+        {
+            vaultCodes.RemoveAt(1);
         }
 
-        chosenCode = vaultCodes[Random.Range(0, vaultCodes.Count)];
+        if (vaultCodes.Count > 0)
+        {
+            chosenCode = vaultCodes[Random.Range(0, vaultCodes.Count)];
+        }
+
         Debug.Log(chosenCode);
 
         foreach (var p in gamePages)
@@ -87,12 +141,14 @@ public class BackendHandler : MonoBehaviour
 
     public void goToReady()
     {
+        playClickSFX();
         gamePages[0].SetActive(false);
         gamePages[1].SetActive(true);
     }
 
     public void startGame()
     {
+        playClickSFX();
         gamePages[1].SetActive(false);
         gamePages[2].SetActive(true);
         enterKey.GetComponent<Button>().interactable = false;
@@ -100,6 +156,8 @@ public class BackendHandler : MonoBehaviour
 
     public void inputNumber(int num)
     {
+        playClickSFX();
+
         if (num == 11)
         {
             confirmInput();
@@ -146,8 +204,15 @@ public class BackendHandler : MonoBehaviour
         }
     }
 
+    private void playClickSFX()
+    {
+        SFXPlayer.clip = clickSFX;
+        SFXPlayer.Play();
+    }
+
     public void confirmInput()
     {
+        BGMPlayer.Pause();
         if (currInput == chosenCode)
         {
             vaultAnim.Play("VaultOpenAnim");
@@ -161,8 +226,7 @@ public class BackendHandler : MonoBehaviour
 
     public void resetVault()
     {
-        peopleNo++;
-        PlayerPrefs.SetInt("peopleData", peopleNo);
+        savePlayerPrefs();
 
         #region FILE OVERWRITE (UNUSED)
         //ref: https://stackoverflow.com/questions/33646428/c-sharp-overwriting-file-with-streamwriter-created-from-filestream
@@ -186,17 +250,16 @@ public class BackendHandler : MonoBehaviour
         #endregion
 
         SceneManager.LoadScene(0);
-        //StartCoroutine(resetDelay(2f));
     }
 
     public void printTicket()
     {
         if (winImage.activeInHierarchy)
         {
-            PrinterPlugin.print(winTicket, true, PrinterPlugin.PrintScaleMode.PAGE_WIDTH);
+            PrinterPlugin.print(winTicket, false, PrinterPlugin.PrintScaleMode.PAGE_WIDTH);
         } else if (loseImage.activeInHierarchy)
         {
-            PrinterPlugin.print(loseTicket, true, PrinterPlugin.PrintScaleMode.PAGE_WIDTH);
+            PrinterPlugin.print(loseTicket, false, PrinterPlugin.PrintScaleMode.PAGE_WIDTH);
         }
     }
 
@@ -220,6 +283,37 @@ public class BackendHandler : MonoBehaviour
         }
     }
 
+    public void doubleClickSound()
+    {
+        clickNo++;
+        if (clickNo == 1)
+        {
+            clickTime = Time.time;
+        }
+
+        if (clickNo > 1 && Time.time - clickTime < clickDelay)
+        {
+            clickNo = 0;
+            clickTime = 0;
+            int v = PlayerPrefs.GetInt("volume");
+            switch (v)
+            {
+                case 0:
+                    PlayerPrefs.SetInt("volume", 1);
+                    break;
+
+                case 1:
+                    PlayerPrefs.SetInt("volume", 0);
+                    break;
+            }
+            toggleSound();
+        }
+        else if (clickNo > 2 || Time.time - clickTime > 1)
+        {
+            clickNo = 0;
+        }
+    }
+
     private void togglePeopleBtn(bool show)
     {
         if (!show)
@@ -229,10 +323,26 @@ public class BackendHandler : MonoBehaviour
         } else
         {
             peopleBtn.GetComponent<Button>().interactable = false;
-            peopleDisplay.text = (peopleNo + 1).ToString();
+            peopleDisplay.text = "Win: " + winNo.ToString() + "\n$8 Off: " + discountNo.ToString() + "\nFree Gift: " + giftNo.ToString() + "\nTotal: " + peopleNo.ToString();
             peopleDisplay.color = Color.white;
-            StartCoroutine(showPeople(1f));
+            StartCoroutine(showPeople(2f));
         }
+    }
+
+    private void toggleSound()
+    {
+        int vol = PlayerPrefs.GetInt("volume");
+        SFXPlayer.volume = vol;
+        BGMPlayer.volume = vol;
+    }
+
+    private void savePlayerPrefs()
+    {
+        PlayerPrefs.SetInt("peopleData", peopleNo);
+        PlayerPrefs.SetInt("winData", winNo);
+        PlayerPrefs.SetInt("discountData", discountNo);
+        PlayerPrefs.SetInt("giftData", giftNo);
+        PlayerPrefs.Save();
     }
 
     private void Update()
@@ -241,17 +351,54 @@ public class BackendHandler : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.R))
         {
             peopleNo = 0;
+            discountNo = 0;
+            giftNo = 0;
+            winNo = 0;
+            PlayerPrefs.DeleteKey("prevCode");
+            savePlayerPrefs();
+        }
+
+        //timeout during vault code input
+        if (gamePages[2].activeInHierarchy)
+        {
+            if (Input.GetMouseButtonDown(0))
+            {
+                idleTimer = idleTimerMax;
+            }
+
+            if (!vaultAnim.isPlaying)
+            {
+                if (idleTimer > 0)
+                {
+                    idleTimer -= Time.deltaTime;
+                } else
+                {
+                    idleTimer = idleTimerMax;
+                    resetVault();
+                }
+            }
         }
     }
 
     private void displayResult(bool win)
     {
+        peopleNo++;
         winImage.SetActive(false);
         loseImage.SetActive(false);
 
         if (win)
         {
-            PlayerPrefs.SetString("prevCode", chosenCode);
+            winNo++;
+            if (PlayerPrefs.HasKey("prevCode")) //add onto prev code
+            {
+                string code = PlayerPrefs.GetString("prevCode");
+                code = code + "," + chosenCode;
+                PlayerPrefs.SetString("prevCode", code);
+            }
+            else
+            {
+                PlayerPrefs.SetString("prevCode", chosenCode);
+            }
             winImage.SetActive(true);
             resultDisplayEng.text = "CONGRATULATIONS! You made the right guess and won a 10g gold bar!\n<size=30>*To be redeemed at this terminal</size>";
             resultDisplayCh.text = "恭喜，您猜对了，赢得了999.9纯金金条(10克)\n<size=30>*仅限在此Terminal兑换</size>";
@@ -262,11 +409,13 @@ public class BackendHandler : MonoBehaviour
             int r = Random.Range(0, 10);
             if (r <= 4)
             {
+                discountNo++;
                 loseTicket = ticket1;
                 resultDisplayEng.text = "THANK YOU FOR PARTICIPATING. PLEASE PRESENT THIS CARD AT CASHIER TO REDEEM INSTANT $8 OFF.";
                 resultDisplayCh.text = "感谢您的参与. 请在柜台出示此卡以享受$ 8折扣！";
             } else
             {
+                giftNo++;
                 loseTicket = ticket2;
                 resultDisplayEng.text = "THANK YOU FOR PARTICIPATING. PLEASE PRESENT THIS CARD AT CASHIER TO REDEEM A FREE GIFT.";
                 resultDisplayCh.text = "感谢您的参与. 请在柜台出示此卡以换取精美礼品！";
@@ -278,14 +427,11 @@ public class BackendHandler : MonoBehaviour
 
         int child = gamePages[3].transform.childCount;
         gamePages[3].transform.GetChild(child - 1).GetComponent<ObjectFadeInAndOut>().toggleFade();
-        StartCoroutine(toggleButtons(gamePages[3].transform.GetChild(child - 1).GetComponent<ObjectFadeInAndOut>().timerMax + 1f));
+        StartCoroutine(togglePrint(gamePages[3].transform.GetChild(child - 1).GetComponent<ObjectFadeInAndOut>().timerMax + 1f));
     }
 
     private IEnumerator goToResult (float waitTime)
     {
-        resetBtn.SetActive(false);
-        printBtn.SetActive(false);
-
         yield return new WaitForSeconds(waitTime);
 
         if (currInput == chosenCode)
@@ -304,16 +450,16 @@ public class BackendHandler : MonoBehaviour
         togglePeopleBtn(false);
     }
 
-    private IEnumerator toggleButtons(float waitTime)
+    private IEnumerator togglePrint(float waitTime)
     {
         yield return new WaitForSeconds(waitTime);
-        resetBtn.SetActive(true);
-        printBtn.SetActive(true);
+        printTicket();
+        StartCoroutine(resetDelay(20f));
     }
 
     private IEnumerator resetDelay (float waitTime)
     {
         yield return new WaitForSeconds(waitTime);
-        SceneManager.LoadScene(0);
+        resetVault();
     }
 }
