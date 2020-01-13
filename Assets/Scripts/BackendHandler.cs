@@ -5,12 +5,15 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.EventSystems;
 
 public class BackendHandler : MonoBehaviour
 {
     public static BackendHandler singleton;
     private string currInput, chosenCode, filePath;
-    public GameObject numberDisplay, enterKey, peopleBtn;
+    public GameObject numberDisplay, numberInput, enterKey, peopleBtn;
+    public TMP_InputField hint1, hint2;
+    public KeyboardHandler softKeyboard;
     public List<GameObject> gamePages;
     public Animation vaultAnim;
     public AudioClip clickSFX;
@@ -128,6 +131,9 @@ public class BackendHandler : MonoBehaviour
         if (vaultCodes.Count > 0)
         {
             chosenCode = vaultCodes[Random.Range(0, vaultCodes.Count)];
+        } else
+        {
+            chosenCode = null;
         }
 
         Debug.Log(chosenCode);
@@ -137,6 +143,9 @@ public class BackendHandler : MonoBehaviour
             p.SetActive(false);
         }
         gamePages[0].SetActive(true);
+        BGMPlayer.Play();
+        softKeyboard.isOnScreen = false;
+        softKeyboard.hideKeyboard();
     }
 
     public void goToReady()
@@ -148,9 +157,14 @@ public class BackendHandler : MonoBehaviour
 
     public void startGame()
     {
+        idleTimerMax = 10f;
+        idleTimer = idleTimerMax;
+        hint1.interactable = false;
+        hint2.interactable = false;
         playClickSFX();
         gamePages[1].SetActive(false);
         gamePages[2].SetActive(true);
+        vaultAnim.Play("VaultDefault");
         enterKey.GetComponent<Button>().interactable = false;
     }
 
@@ -183,7 +197,7 @@ public class BackendHandler : MonoBehaviour
             }
         }
         
-        for (int i = 1; i < numberDisplay.transform.childCount; i++)
+        for (int i = 1; i < numberDisplay.transform.childCount - 1; i++)
         {
             numberDisplay.transform.GetChild(i).transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = "_";
             enterKey.GetComponent<Button>().interactable = false;
@@ -212,7 +226,7 @@ public class BackendHandler : MonoBehaviour
 
     public void confirmInput()
     {
-        BGMPlayer.Pause();
+        BGMPlayer.Stop();
         if (currInput == chosenCode)
         {
             vaultAnim.Play("VaultOpenAnim");
@@ -248,8 +262,21 @@ public class BackendHandler : MonoBehaviour
             fs.Close();
         }*/
         #endregion
+        
+        currInput = string.Empty;
+        for (int i = 1; i < numberDisplay.transform.childCount - 1; i++)
+        {
+            numberDisplay.transform.GetChild(i).transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = "_";
+            enterKey.GetComponent<Button>().interactable = false;
+        }
 
-        SceneManager.LoadScene(0);
+        if (softKeyboard.isOnScreen)
+        {
+            toggleSafeButtons(true);
+            softKeyboard.hideKeyboard();
+        }
+
+        SetupVault();
     }
 
     public void printTicket()
@@ -314,6 +341,65 @@ public class BackendHandler : MonoBehaviour
         }
     }
 
+    public void doubleClickKeyboard()
+    {
+        clickNo++;
+        if (clickNo == 1)
+        {
+            clickTime = Time.time;
+        }
+
+        if (clickNo > 1 && Time.time - clickTime < clickDelay)
+        {
+            clickNo = 0;
+            clickTime = 0;
+            if (gamePages[2].activeInHierarchy)
+            {
+                softKeyboard.numberToggle(true);
+                switch (softKeyboard.isOnScreen)
+                {
+                    case false:
+                        toggleSafeButtons(false);
+                        softKeyboard.showKeyboard();
+                        break;
+
+                    case true:
+                        toggleSafeButtons(true);
+                        softKeyboard.hideKeyboard();
+                        break;
+                }
+            }
+        }
+        else if (clickNo > 2 || Time.time - clickTime > 1)
+        {
+            clickNo = 0;
+        }
+    }
+
+    private void toggleSafeButtons(bool show)
+    {
+        Button[] safeButtons = numberInput.transform.GetComponentsInChildren<Button>();
+        foreach (var b in safeButtons)
+        {
+            b.interactable = show;
+        }
+
+        hint1.interactable = !show;
+        hint2.interactable = !show;
+
+        if (show)
+        {
+            if (currInput.Length < 5)
+            {
+                enterKey.GetComponent<Button>().interactable = false;
+            }
+            else
+            {
+                enterKey.GetComponent<Button>().interactable = true;
+            }
+        }
+    }
+
     private void togglePeopleBtn(bool show)
     {
         if (!show)
@@ -358,12 +444,51 @@ public class BackendHandler : MonoBehaviour
             savePlayerPrefs();
         }
 
+        //timeout during instructions
+        if (gamePages[1].activeInHierarchy)
+        {
+            if (Input.GetMouseButtonDown(0))
+            {
+                idleTimer = idleTimerMax;
+            }
+
+            if (idleTimer > 0)
+            {
+                idleTimer -= Time.deltaTime;
+            }
+            else
+            {
+                idleTimer = idleTimerMax;
+                resetVault();
+            }
+        }
+
         //timeout during vault code input
         if (gamePages[2].activeInHierarchy)
         {
             if (Input.GetMouseButtonDown(0))
             {
                 idleTimer = idleTimerMax;
+
+                //hint modifier stuff
+                GameObject obj = EventSystem.current.currentSelectedGameObject;
+                if (obj != null)
+                {
+                    TMP_InputField thisInput = obj.GetComponent<TMP_InputField>();
+                    if (thisInput != null)
+                    {
+                        softKeyboard.currInput = thisInput;
+                        if (thisInput.text.Length != 0)
+                        {
+                            softKeyboard.middleCaret = true;
+                            softKeyboard.cursorPos = thisInput.caretPosition;
+                        } else
+                        {
+                            softKeyboard.middleCaret = false;
+                            softKeyboard.cursorPos = 0;
+                        }
+                    }
+                }
             }
 
             if (!vaultAnim.isPlaying)
@@ -399,6 +524,7 @@ public class BackendHandler : MonoBehaviour
             {
                 PlayerPrefs.SetString("prevCode", chosenCode);
             }
+            PlayerPrefs.Save();
             winImage.SetActive(true);
             resultDisplayEng.text = "CONGRATULATIONS! You made the right guess and won a 10g gold bar!\n<size=30>*To be redeemed at this terminal</size>";
             resultDisplayCh.text = "恭喜，您猜对了，赢得了999.9纯金金条(10克)\n<size=30>*仅限在此Terminal兑换</size>";
@@ -426,6 +552,7 @@ public class BackendHandler : MonoBehaviour
         gamePages[3].SetActive(true);
 
         int child = gamePages[3].transform.childCount;
+        gamePages[3].transform.GetChild(child - 1).GetComponent<Image>().color = Color.white;
         gamePages[3].transform.GetChild(child - 1).GetComponent<ObjectFadeInAndOut>().toggleFade();
         StartCoroutine(togglePrint(gamePages[3].transform.GetChild(child - 1).GetComponent<ObjectFadeInAndOut>().timerMax + 1f));
     }
@@ -454,7 +581,7 @@ public class BackendHandler : MonoBehaviour
     {
         yield return new WaitForSeconds(waitTime);
         printTicket();
-        StartCoroutine(resetDelay(20f));
+        StartCoroutine(resetDelay(6f));
     }
 
     private IEnumerator resetDelay (float waitTime)
